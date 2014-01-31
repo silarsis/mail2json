@@ -12,6 +12,33 @@
 #
 # This was largely cribbed from https://github.com/relateiq/docker_public/blob/master/Vagrantfile
 
+# The following two methods were taken from https://github.com/mitchellh/vagrant/issues/1874
+# and should be removed and replaced when Vagrantfile can manage installation of plugins.
+# We do this so we can install https://github.com/dotless-de/vagrant-vbguest
+def plugin(name, version = nil, opts = {})
+  @vagrant_home ||= opts[:home_path] || ENV['VAGRANT_HOME'] || "#{ENV['HOME']}/.vagrant.d"
+  plugins = JSON.parse(File.read("#@vagrant_home/plugins.json"))
+
+  if !plugins['installed'].include?(name) || (version && !version_matches(name, version))
+    cmd = "vagrant plugin install"
+    cmd << " --entry-point #{opts[:entry_point]}" if opts[:entry_point]
+    cmd << " --plugin-source #{opts[:source]}" if opts[:source]
+    cmd << " --plugin-version #{version}" if version
+    cmd << " #{name}"
+
+    result = %x(#{cmd})
+  end
+end
+
+def version_matches(name, version)
+  gems = Dir["#@vagrant_home/gems/specifications/*"].map { |spec| spec.split('/').last.sub(/\.gemspec$/,'').split(/-(?=[\d]+\.?){1,}/) }
+  gem_hash = {}
+  gems.each { |gem, v| gem_hash[gem] = v }
+  gem_hash[name] == version
+end
+
+plugin "vagrant-vbguest"
+
 # Use the pre-built vagrant box: http://blog.phusion.nl/2013/11/08/docker-friendly-vagrant-boxes/
 BOX_NAME = ENV['BOX_NAME'] || "docker-ubuntu-12.04.3-amd64-vbox"
 BOX_URI = ENV['BOX_URI'] || "https://oss-binaries.phusionpassenger.com/vagrant/boxes/ubuntu-12.04.3-amd64-vbox.box"
@@ -25,29 +52,7 @@ Vagrant.configure("2") do |config|
   config.vm.network "forwarded_port", guest: 8000, host: 8000
 
   config.vm.provision "docker"
-
-  # Virtualbox guest additions if needed
-  # It is assumed Vagrant can successfully launch the provider instance.
-  if Dir.glob("#{File.dirname(__FILE__)}/.vagrant/machines/default/*/id").empty?
-    pkg_cmd = ''
-    # Add guest additions if local vbox VM. As virtualbox is the default provider,
-    # it is assumed it won't be explicitly stated.
-    if ENV["VAGRANT_DEFAULT_PROVIDER"].nil? && ARGV.none? { |arg| arg.downcase.start_with?("--provider") }
-      pkg_cmd << "echo 'Downloading VBox Guest Additions...'; " \
-        "wget -q http://dlc.sun.com.edgesuite.net/virtualbox/#{VBOX_VERSION}/VBoxGuestAdditions_#{VBOX_VERSION}.iso; "
-      # Prepare the VM to add guest additions after reboot
-      pkg_cmd << "echo -e 'mount -o loop,ro /home/vagrant/VBoxGuestAdditions_#{VBOX_VERSION}.iso /mnt\n" \
-        "echo yes | /mnt/VBoxLinuxAdditions.run\numount /mnt\n" \
-          "rm /root/guest_additions.sh; ' > /root/guest_additions.sh; " \
-        "chmod 700 /root/guest_additions.sh; " \
-        "sed -i -E 's#^exit 0#[ -x /root/guest_additions.sh ] \\&\\& /root/guest_additions.sh#' /etc/rc.local; " \
-        "echo 'Installation of VBox Guest Additions is proceeding in the background.'; " \
-        "echo '\"vagrant reload\" can be used in about 2 minutes to activate the new guest additions.'; "
-      config.vm.provision :shell, :inline => pkg_cmd
-    end
-    # Other installation actions
-    config.vm.provision :shell, :path => "bootstrap.sh"
-  end
+  config.vm.provision :shell, :path => "bootstrap.sh"
 
   config.vm.provider :aws do |aws, override|
     aws.access_key_id = ENV['AWS_ACCESS_KEY_ID']

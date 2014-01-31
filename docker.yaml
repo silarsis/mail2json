@@ -1,29 +1,62 @@
+# Shipyard, to provide a web interface for monitoring the docker containers
 shipyard:
-  fromImage: shipyard/shipyard
-  Hostname: shipyard
-  openStdin: True
-  Tty: True
-  ExposedPorts:
-    8000/tcp: {}
+  container:
+    Image: shipyard/shipyard
+    Hostname: shipyard
+    openStdin: True
+    Tty: True
+    ExposedPorts:
+      8000/tcp: {}
+  run:
+    portBindings:
+      8000/tcp:
+        -
+          HostPort: "8000"
 
+# Zookeeper, to support kafka
 zookeeper:
-  fromImage: jplock/zookeeper
-  Hostname: zookeeper
-  ExposedPorts:
-    49181/tcp: {}
+  container:
+    Image: jplock/zookeeper
+    Hostname: zookeeper
+    ExposedPorts:
+      49181/tcp: {}
+  run:
+    portBindings:
+      49181/tcp:
+        -
+          HostPort: "2181"
 
+# Kafka, to provide a backbone for sending emails to various processors
 kafka:
-  fromImage: wurstmeister/kafka
-  Hostname: kafka
-  ExposedPorts:
-    9092/tcp: {}
-  Env:
-    - BROKER_ID=1
-    - HOST_IP=127.0.0.1
-    - PORT=9092
-  # kafka needs a link to zookeeper, but I can't find the API endpoint for it
+  container:
+    Image: wurstmeister/kafka
+    Hostname: kafka
+    ExposedPorts:
+      9092/tcp: {}
+    Env:
+      - BROKER_ID=1
+      - HOST_IP=127.0.0.1
+      - PORT=9092
+  run:
+    portBindings:
+      9092/tcp:
+        -
+          HostPort: "9092"
+    Links:
+      - "zookeeper:zk"
 
+    # kafka needs a link to zookeeper, but I can't find the API endpoint for it
+
+# SMTP, to provide the front-end SMTP server piping to Kafka
 smtp:
-  fromImage: silarsis/mail2json-smtp
-  Hostname: smtp
-  # smtp needs a link to kafka(?), but I can't find the API endpoint for it
+  container:
+    Image: silarsis/mail2json-smtp
+    Hostname: smtp
+    ExposedPorts:
+      25/tcp: {}
+  run:
+    portBindings:
+      25/tcp:
+        -
+          HostPort: "25"
+    # smtp needs a link to kafka(?), but I can't find the API endpoint for it

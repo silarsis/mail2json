@@ -1,41 +1,88 @@
-#!/usr/bin/ruby
+#!/usr/bin/ruby1.9.3
 #
 # Script to provision docker instances
 
 require 'docker'
 require 'yaml'
+require 'optparse'
 
-Docker.validate_version!
-
-# Grab existing and running images/containers, compare with config
-existing = Docker::Image.all.map{ |image| image.info['Repository']}
-running = Docker::Container.all.map{ |container| container.json['Config']['Image'] }
-config = YAML.load_file('docker.yaml')
-imagesToCreate = config.select{ |k, v| !existing.include?(v['fromImage']) }
-docksToRun = config.select{ |k, v| !running.include?(v['fromImage']) }
-
-# Create all images that don't currently exist
-imagesToCreate.each_pair do |name, data|
-	puts "Creating Image #{name}"
-	Docker::Image.create('fromImage' => data['fromImage'])
-end
-
-# Run all containers that aren't currently running
-docksToRun.each_pair do |name, data|
-	puts "Running Container #{name}"
-	data['Image'] = data['fromImage']
-	data.delete('fromImage')
-	portBindings = nil
-	# Want to change the handling here
-	if data.has_key?('ExposedPorts')
-		data['NetworkDisabled'] = false
-		data['PortSpecs'] = nil
-		portBindings = {}
-		data['ExposedPorts'].each_key{ |k| portBindings[k] = [{'HostIp' => '', 'HostPort' => k.split('/')[0]}]}
+class DockerCommands
+	def initialize
+		@config = YAML.load_file('/vagrant/docker.yaml')
+		@main_ip = `ifconfig docker0 | grep 'inet addr'`.split(':')[1].split[0]
+		Docker.validate_version!
+		# Ensure that we're registered with shipyard, assuming shipyard is running
+		if `pgrep 'shipyard-agent'` == ""
+			key = `/vagrant/shipyard-agent -url http://#{main_ip}:8000 -register 2>&1 | grep Agent | awk '{ print $5 }'`
+			fork do
+				exec("/vagrant/shipyard-agent -url http://#{main_ip}:8000 -key #{key}")
+			end
+		end
 	end
-	Docker::Container.create(data).start('portBindings' => portBindings)
+
+	def create
+		imagesToCreate.each_pair do |name, data|
+			puts "Creating Image #{name}"
+			data['container']['Env'] = enhanceEnvironment(data['container'].fetch('Env', [])
+			Docker::Image.create('fromImage' => data['container']['Image'])
+		end
+	end
+
+	def run
+		containersToRun.each_pair do |name, data|
+			puts "Running Container #{name}"
+			Docker::Container.create(data['container']).start(data['run'])
+		end
+	end
+
+	def ps
+		puts "Containers running:"
+		puts containers.map{ |c| "  #{@config.find{ |k, v| v['container']['Image'] == c }[0]}"}
+		puts "Containers not running:"
+		puts containersToRun.map{ |k, v| "  #{k}"}
+	end
+
+	def stop
+		Docker::Container.all.map { |c| c.delete }
+	end
+
+	private
+
+	def enhanceEnvironment(env)
+		env << "MAIN_IP=#{@main_ip}"
+	end
+
+	def images
+		Docker::Image.all.map{ |image| image.info['Repository']}
+	end
+
+	def containers
+		Docker::Container.all.map{ |container| container.json['Config']['Image'] }
+	end
+
+	def imagesToCreate
+		@config.select{ |k, v| !images.include?(v['container']['Image']) }
+	end
+
+	def containersToRun
+		@config.select{ |k, v| !containers.include?(v['container']['Image']) }
+	end
 end
 
-# Ensure that we're registered with shipyard, assuming shipyard is running
-key = `/vagrant/shipyard-agent -url http://127.0.0.1:8000 -register 2>&1 | grep Agent | awk '{ print $5 }'`
-exec("/vagrant/shipyard-agent -url http://localhost:8000 -key #{key}")
+valid_commands = DockerCommands.instance_methods(false)
+optparse = OptionParser.new do |opts|
+	opts.banner = "Usage: #{$0} #{valid_commands}"
+	opts.on_tail('-h', '--help', 'Show this message') do
+		puts opts
+		exit
+	end
+end
+optparse.parse!
+dc = DockerCommands.new
+if ARGV.empty?
+	dc.create
+	dc.run
+else
+	dc.method(ARGV.pop).call
+end
+

@@ -19,4 +19,4 @@ echo 'DOCKER_OPTS="-d -H tcp://127.0.0.1:4243 -H unix:///var/run/docker.sock"' >
 service docker restart
 
 # Provision the docker images
-/usr/bin/ruby1.9.3 ./provision_docker.rb
+/usr/bin/ruby1.9.3 /vagrant/provision_docker.rb
