@@ -13,9 +13,9 @@ class DockerCommands
 		Docker.validate_version!
 		# Ensure that we're registered with shipyard, assuming shipyard is running
 		if `pgrep 'shipyard-agent'` == ""
-			key = `/vagrant/shipyard-agent -url http://#{main_ip}:8000 -register 2>&1 | grep Agent | awk '{ print $5 }'`
+			key = `/vagrant/shipyard-agent -url http://#{@main_ip}:8000 -register 2>&1 | grep Agent | awk '{ print $5 }'`
 			fork do
-				exec("/vagrant/shipyard-agent -url http://#{main_ip}:8000 -key #{key}")
+				exec("/vagrant/shipyard-agent -url http://#{@main_ip}:8000 -key #{key}")
 			end
 		end
 	end
@@ -23,7 +23,7 @@ class DockerCommands
 	def create
 		imagesToCreate.each_pair do |name, data|
 			puts "Creating Image #{name}"
-			data['container']['Env'] = enhanceEnvironment(data['container'].fetch('Env', [])
+			data['container']['Env'] = enhanceEnvironment(data['container'].fetch('Env', []))
 			Docker::Image.create('fromImage' => data['container']['Image'])
 		end
 	end
